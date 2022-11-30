@@ -452,83 +452,61 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
 def throw_polys(img, n_points=100, n_corners=3, distance=10, heightmap=None):
     width, height = img.size
     
-    def get_points_distances(img, heightmap=None, distance=10):
-
-        if not isinstance(img, Image.Image):
-            raise TypeError("Image must be a valid PIL image")
-            
-        img = img.convert("RGBA")
-        if heightmap == None:
-            
-            distances = [distance] * n_points
-            
-            xs = np.random.randint(0, width, n_points)
-            ys = np.random.randint(0, height, n_points)
-            
-            return xs, ys, distances
-            
-            
-        else:
-            heightmap = ImageOps.invert(heightmap.convert("L"))
-            
-            if heightmap.size != img.size:
-                heightmap = heightmap.resize(img.size)
-                
-            dithered = dither(heightmap)
+    img, heightmap = check_img_hmap(img, heightmap)
     
-            coords_y, coords_x = np.where(np.array(dithered) < 128)
+    def get_points_distances(img, heightmap=heightmap, distance=distance, n_points=n_points):
+
+        
+        size = img.width * img.height
+        
+        indices = np.arange(size)
+
+        values = heightmap.reshape(size)
+        probas = values / np.sum(values)
+
+        idxs = np.random.choice(indices, size=n_points, p = probas)
+
+        
+        xs = []
+        ys = []
+        distances = []
+        for idx in idxs:
+            x = idx % img.width
+            y = idx // img.width
             
-            points = np.stack((coords_x, coords_y), axis=1)
-            tree = scipy.spatial.cKDTree(points)
+            xs.append(x)
+            ys.append(y)
+            distances.append(distance - (values[idx] * distance) + distance)
             
-            rng = default_rng()
-            numbers = rng.choice(points.shape[0], size=n_points, replace=False)
-            distances = []
-            
-            xs, ys = [], []
-            for i in numbers:
-                
-                point = points[i]
-                xs.append(point[0])
-                ys.append(point[1])
-                
-                n = tree.query_ball_point(point, distance)
-                if len(n) > 1:
-                                         
-                    point2 = points[n[1]]
-                    dist = np.sqrt(np.sum(np.square(point - point2)))
-                    distances.append(dist)
-                
-                else:
-                    distances.append(dist)
-                    
-                   
-            return xs, ys, distances
+        return xs, ys, distances
     
 
     def get_polygon_coords(point, n_corners=3, distance=10):
         thetas = np.random.uniform(0, 2*np.pi, size=n_corners)
         # thetas = thetas[np.argsort(thetas)]
-        dists = np.random.uniform(0, distance, size=n_corners)
+        try:
+            dists = np.random.uniform(0, distance, size=n_corners)
+        except:
+            print(distance, n_corners)
         
         x = list(np.clip(dists * np.cos(thetas) + point[0], 0, width - 1))
         y = list(np.clip(dists * np.sin(thetas) + point[1], 0, height - 1))
         
-        col = np.asarray([0, 0, 0])
+        col = np.asarray([0, 0, 0, 255])
         pol = []
         for c1, c2 in zip(x, y):
             
             col += np.asarray(img.getpixel((c1, c2)))
             pol.append((c1, c2))
             
-        col = (col / n_corners).astype(np.uint) # average corner color
+        col = (col / n_corners).astype(np.uint) # average corners color
         
-        # col = img.getpixel((point[0], point[1])) # color of the centre point
+        col = img.getpixel((point[0], point[1])) # color of the centre point
             
         return pol, tuple(col)
 
 
-    xs, ys, distances = get_points_distances(img, heightmap=heightmap, distance=distance)
+    xs, ys, distances = get_points_distances(img, heightmap=heightmap, distance=distance, n_points=n_points)
     
     results = {
         
