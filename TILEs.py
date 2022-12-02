@@ -5,38 +5,83 @@ Created on Thu Nov 17 16:43:22 2022
 @author: Sylvain
 """
 import numpy as np
-from numpy.random import default_rng
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw
 
-import scipy.spatial 
-import matplotlib.pyplot as plt
-
+import scipy.spatial
 from shapely.geometry import Polygon
-from matplotlib.collections import PolyCollection
+
 
 #%% Shared functions
 def check_img_hmap(img, heightmap=None):
+    """
+    Function to check the image, heightmap, and output the heightmap as numpy array.
+
+    Parameters
+    ----------
+    img : PIL.Image
+        The image to process
+    heightmap : PIL.Image, optional
+        Heightmap to set the strength of the effect. The default is None.
+
+    Raises
+    ------
+    TypeError
+        Raises if img is not a valid PIL image.
+
+    Returns
+    -------
+    img : PIL.Image, RGBA
+        The image to modify.
+    heightmap : Normalized numpy array
+        Heightmap to set the strength of the effect..
+
+    """
 
     if not isinstance(img, Image.Image):
         raise TypeError("Image must be a valid PIL image")
     img = img.convert("RGBA")
-    if heightmap == None:
+    if not heightmap or not isinstance(heightmap, Image.Image):
+        # If there is no heightmap, we simply generate a full white one.
         heightmap = Image.new("L", img.size, color=(255))
     else:
         heightmap = heightmap.convert("L")
         if heightmap.size != img.size:
+            # Making sure the heightmap has the right dimensions.
             heightmap = heightmap.resize(img.size)
+    # normalizing the heightmap to [0, 1]
     heightmap = np.array(heightmap) / 255.0
 
     return img, heightmap
 
 
 def RGB_std(arr, hmap):
+    """
+    Function to output the standard deviation of the selected array 
+    and its average color.
 
+    Parameters
+    ----------
+    arr : numpy.asarray
+        The image as a numpy array.
+    hmap : numpy.asarray
+        The heightmap as a numpy array.
+
+    Returns
+    -------
+    std : float
+        max Standar deviation of the colors of the image
+    col : tuple(uint, uint, uint)
+        average color of the area, (R, G, B).
+    hmap_weight : TYPE
+        Max value of the heightmap in this part of the image.
+
+    """
+    # We check only where the pixel is not transparent
     valid_idx = np.where(arr[:, :, 3] != 0)
     arr = arr[valid_idx]
     hmap = hmap[valid_idx]
 
+    # removing alpha channel.
     arr = arr[:, :-1]
 
     std = np.max(np.std(arr, axis=0))
@@ -51,9 +96,35 @@ def RGB_std(arr, hmap):
 
 #%% Dithering
 def dither(img, kernel="Floyd-Steinberg", nc=2):
+    """
+    Function to dither an image in B&W. Available kernels are Floyd-Steinberg,
+    Jarvis-Judis-Ninke, Stucki, Atkinson. Don't hesitate to add yours.
+    Inspired by https://tannerhelland.com/2012/12/28/dithering-eleven-algorithms-source-code.html
     
-    img = img.convert('L')
-    
+    Parameters
+    ----------
+    img : PIL.Image
+        The image to dither.
+    kernel : string, optional
+        Name of the kernel used for dithering. The default is "Floyd-Steinberg".
+    nc : integer, optional
+        Number of colors used for dithering. The default is 2.
+
+    Raises
+    ------
+    ValueError
+        If the Image is not a proper PIL Image.
+
+    Returns
+    -------
+    PIL.image
+        The dithered image.
+
+    """
+    if not isinstance(img, Image.Image):
+        raise TypeError("Image must be a valid PIL image")
+    img = img.convert("L")
+
     def _get_new_val(old_val, nc):
         """
         Get the "closest" colour to old_val in the range [0,1] per channel divided
@@ -93,22 +164,24 @@ def dither(img, kernel="Floyd-Steinberg", nc=2):
     width, height = img.size
     arr = np.array(img, dtype=float) / 255
 
+    # choosing the kernel, normalising it.
     ker = dither_kernels[kernel]
     ker = ker / np.sum(ker)
 
     ker_h, ker_w, = ker.shape
-
     ker_h = ker_h // 2
     ker_w = ker_w // 2
 
     pad = max(ker_h, ker_w)
 
+    # Padding the image to fit the kernel. For RGB or L images.
     if len(arr.shape) == 3:
 
         arr = np.pad(arr, ((pad, pad), (pad, pad), (0, 0)), "constant")
         ker = np.repeat(ker[:, :, np.newaxis], 3, axis=2)
     else:
         arr = np.pad(arr, pad)
+    # Running the kernel through the image.
     for ir in range(height):
         for ic in range(width):
 
@@ -133,7 +206,39 @@ def dither(img, kernel="Floyd-Steinberg", nc=2):
 
 
 #%% Quadtrees
-def quadtree(img, std_thr, heightmap=None, level=0, max_level=6):
+def quadtree(img, std_thr=40, heightmap=None, max_level=6):
+    '''
+    Function to filter the image with recursive quadtrees, depending on the 
+    local standard deviation or according to a heightmap.
+    Inspired by many other nice quadtree scripts:
+    https://github.com/kennycason/art
+    https://github.com/fogleman/Quads
+    
+
+    Parameters
+    ----------
+    img : PIL Image
+        The image to filter.
+    std_thr : float, optional
+        Standard deviation threshold where the recursion will end. The default is 40.
+    heightmap : PIL Image, optional
+        The heightmap to set the effect. The default is None.
+    max_level : int, optional
+        Max recursion level, as a safety mechanism. The default is 6.
+
+    Returns
+    -------
+    results : Dict
+        Dict containing all the extracted values.
+        "top" & "left": top - left coordinates of the quad
+        "x" & "y": cznter coordinates of the quad
+        "width" & "height": dimensions of the quad
+        "colors": average color of the quad
+        "polys": coordinates of the polygons extracted
+        "level": recursion level of the polygon
+        
+
+    '''
 
     img, heightmap = check_img_hmap(img, heightmap)
 
@@ -145,7 +250,7 @@ def quadtree(img, std_thr, heightmap=None, level=0, max_level=6):
         "y": [],
         "width": [],
         "height": [],
-        "color": [],
+        "colors": [],
         "polys": [],
         "level": [],
     }
@@ -163,11 +268,8 @@ def quadtree(img, std_thr, heightmap=None, level=0, max_level=6):
 
         std, col, hmap_weight = RGB_std(to_check, hmap_to_check)
 
-        if np.isnan(std):
-            raise ValueError(
-                "Error happened at coordinates x={left}, y={top} with width={width}, height={height}"
-            )
-        # Ending if std below threshold or if the subdivision is 1 pixel
+        # Ending if std below threshold or reaching maximum level or heightmap threshold
+        # You would notice that the heightmap calculation actually forces a maximum level of 10.
         if (std < thr) | (level >= max_level) | (hmap_weight - (level * 0.1) < 0.1):
             # And saving the values, of course.
             results["top"] += [top]
@@ -176,9 +278,9 @@ def quadtree(img, std_thr, heightmap=None, level=0, max_level=6):
             results["y"] += [top + height / 2]
             results["width"] += [width]
             results["height"] += [height]
-            results["color"] += [col]
+            results["colors"] += [col]
             results["level"] += [level]
-
+            # polygon coordinates
             poly = [
                 [left, top],
                 [left + width, top],
@@ -188,6 +290,7 @@ def quadtree(img, std_thr, heightmap=None, level=0, max_level=6):
             results["polys"] += [np.asarray(poly)]
 
             return
+        
         else:
 
             x2 = left + width / 2
@@ -235,6 +338,40 @@ def quadtree(img, std_thr, heightmap=None, level=0, max_level=6):
 
 #%% Voronoitrees
 def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
+    '''
+    Function to filter the image with recursive voronoi areas, depending on the 
+    local standard deviation or according to a heightmap.
+    Inspired by https://github.com/rougier/recursive-voronoi
+    and https://gist.github.com/pv/8036995
+
+    Parameters
+    ----------
+    img : PIL.Image
+        The image to filter.
+    npoints : int, optional
+        The number of points in the image to calculate the voronoi polygons. 
+        The default is 10.
+    max_level : int, optional
+        Max recursion level, as a safety mechanism. The default is 6.
+    std_thr : float, optional
+        Standard deviation threshold where the recursion will end. The default is 40.
+    heightmap : PIL Image, optional
+        The heightmap to set the effect. The default is None.
+
+    Returns
+    -------
+    results : Dict
+        Dict containing all the extracted values.
+        "top" & "left": top - left coordinates of the quad
+        "x" & "y": cznter coordinates of the quad
+        "width" & "height": dimensions of the quad
+        "colors": average color of the quad
+        "polys": coordinates of the polygons extracted
+        "level": recursion level of the polygon
+        "shifted_polys": polygons shifted to their minimum coordinates
+        "images": Extracted images
+
+    '''
 
     img, heightmap = check_img_hmap(img, heightmap)
 
@@ -336,6 +473,7 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
         return points
 
     def extract_polygon(img, hmap, poly):
+        # Function to extract the polygon from the image
         coords = list(poly.exterior.coords)
         xs = [a for (a, b) in coords]
         ys = [b for (a, b) in coords]
@@ -384,7 +522,7 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
 
     def voronoi(img, V, results, npoints, level, max_level, std_thr, heightmap):
         """ Recursive voronoi """
-        
+
         n = np.clip(npoints - level, 5, npoints)
         points = poly_random_points_safe(V, n)
         regions, vertices = bounded_voronoi(points)
@@ -393,7 +531,9 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
         clipped_img, clipped_hmap, temp_results = extract_polygon(img, heightmap, clip)
 
         std, col, hmap_weight = RGB_std(clipped_img, clipped_hmap)
-
+        
+        # Ending if std below threshold or reaching maximum level or heightmap threshold
+        # You would notice that the heightmap calculation actually forces a maximum level of 10.
         if (level == max_level) | (std < std_thr) | (hmap_weight - (level * 0.1) < 0.1):
 
             tile = Image.fromarray(clipped_img, "RGBA")
@@ -401,20 +541,22 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
             for k, v in temp_results.items():
                 results[k] += temp_results[k]
             results["images"] += [tile]
-            results["color"] += [col]
+            results["colors"] += [col]
             results["level"] += [level]
             results["polys"] += [np.array([point for point in clip.exterior.coords])]
 
             return
+        
         for region in regions:
+            # Using Shapely for the polygon intersection
             polygon = Polygon(vertices[region]).intersection(
                 clip
-            )  # Using Shapely for the clipping
+            )  
             polygon = np.array([point for point in polygon.exterior.coords])
             voronoi(
                 img, polygon, results, npoints, level + 1, max_level, std_thr, heightmap
             )
-        return
+        
 
     results = {
         "top": [],
@@ -423,7 +565,7 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
         "y": [],
         "width": [],
         "height": [],
-        "color": [],
+        "colors": [],
         "polys": [],
         "shifted_polys": [],
         "images": [],
@@ -431,7 +573,8 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
     }
 
     width, height = img.size
-
+    
+    # the really first polygon is the image itself
     first_poly = np.asarray(
         [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]]
     )
@@ -449,86 +592,104 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
 
     return results
 
-def throw_polys(img, n_points=100, n_corners=3, distance=10, heightmap=None):
-    width, height = img.size
-    
-    img, heightmap = check_img_hmap(img, heightmap)
-    
-    def get_points_distances(img, heightmap=heightmap, distance=distance, n_points=n_points):
 
+def throw_polys(img, n_points=100, n_corners=3, distance=10, heightmap=None):
+    '''
+    Functions that will generate n_corners polygons in random locations on the image.
+    Position and size of the polygons can be modified by a heightmap
+    
+
+    Parameters
+    ----------
+    img : PIL.Image
+        The image to filter.
+    n_points : int, optional
+        Number of polygons to generate. The default is 100.
+    n_corners : int, optional
+        Number of sides of the polygon. The default is 3.
+    distance : int, optional
+        Max distance from center of the polygon to their corners. The default is 10.
+    heightmap : PIL Image, optional
+        The heightmap to set the effect. The default is None.
+
+    Returns
+    -------
+    results : Dict
+        Dict containing all the extracted values.
+        "x" & "y": cznter coordinates of the quad
+        "colors": average color of the quad
+        "polys": coordinates of the polygons extracted
         
+    '''
+    width, height = img.size
+
+    img, heightmap = check_img_hmap(img, heightmap)
+    img = img.convert("RGB")
+
+    def get_points_distances(
+        img, heightmap=heightmap, distance=distance, n_points=n_points
+    ):
+
         size = img.width * img.height
-        
+
         indices = np.arange(size)
 
         values = heightmap.reshape(size)
         probas = values / np.sum(values)
 
-        idxs = np.random.choice(indices, size=n_points, p = probas)
+        idxs = np.random.choice(indices, size=n_points, p=probas)
 
-        
         xs = []
         ys = []
         distances = []
         for idx in idxs:
             x = idx % img.width
             y = idx // img.width
-            
+
             xs.append(x)
             ys.append(y)
             distances.append(distance - (values[idx] * distance) + distance)
-            
         return xs, ys, distances
-    
 
     def get_polygon_coords(point, n_corners=3, distance=10):
-        thetas = np.random.uniform(0, 2*np.pi, size=n_corners)
+        thetas = np.random.uniform(0, 2 * np.pi, size=n_corners)
         # thetas = thetas[np.argsort(thetas)]
         try:
             dists = np.random.uniform(0, distance, size=n_corners)
         except:
             print(distance, n_corners)
-        
         x = list(np.clip(dists * np.cos(thetas) + point[0], 0, width - 1))
         y = list(np.clip(dists * np.sin(thetas) + point[1], 0, height - 1))
-        
-        col = np.asarray([0, 0, 0, 255])
+
+        col = np.asarray([0, 0, 0])
         pol = []
         for c1, c2 in zip(x, y):
-            
+
             col += np.asarray(img.getpixel((c1, c2)))
             pol.append((c1, c2))
-            
-        col = (col / n_corners).astype(np.uint) # average corners color
-        
-        col = img.getpixel((point[0], point[1])) # color of the centre point
-            
+        col = (col / n_corners).astype(np.uint)  # average corners color
+
+        col = img.getpixel((point[0], point[1]))  # color of the centre point
+
         return pol, tuple(col)
 
+    xs, ys, distances = get_points_distances(
+        img, heightmap=heightmap, distance=distance, n_points=n_points
+    )
 
-    xs, ys, distances = get_points_distances(img, heightmap=heightmap, distance=distance, n_points=n_points)
-    
     results = {
-        
         "x": list(xs),
         "y": list(ys),
-        
         "colors": [],
         "polys": [],
         "shifted_polys": [],
         "images": [],
         "level": [],
     }
-    
-    
-    
+
     for x, y, d in zip(xs, ys, distances):
-        
+
         poly, color = get_polygon_coords((x, y), n_corners=n_corners, distance=d)
-        results['polys'].append(poly)
-        results['colors'].append(color)
-        
-    
+        results["polys"].append(poly)
+        results["colors"].append(color)
     return results
-
-
