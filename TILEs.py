@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw
 
 import scipy.spatial
 from shapely.geometry import Polygon
+from collections import defaultdict
 
 
 #%% Shared functions
@@ -243,17 +244,7 @@ def quadtree(img, std_thr=40, heightmap=None, max_level=6):
     img, heightmap = check_img_hmap(img, heightmap)
 
     # We will save the coordinates in this dict.
-    results = {
-        "top": [],
-        "left": [],
-        "x": [],
-        "y": [],
-        "width": [],
-        "height": [],
-        "colors": [],
-        "polys": [],
-        "level": [],
-    }
+    results = defaultdict(list)
 
     def subdivide(
         arr, thr, topleft, widthheight, results, heightmap, level=0, max_level=max_level
@@ -272,14 +263,14 @@ def quadtree(img, std_thr=40, heightmap=None, max_level=6):
         # You would notice that the heightmap calculation actually forces a maximum level of 10.
         if (std < thr) | (level >= max_level) | (hmap_weight - (level * 0.1) < 0.1):
             # And saving the values, of course.
-            results["top"] += [top]
-            results["left"] += [left]
-            results["x"] += [left + width / 2]
-            results["y"] += [top + height / 2]
-            results["width"] += [width]
-            results["height"] += [height]
-            results["colors"] += [col]
-            results["level"] += [level]
+            results["top"].append(top)
+            results["left"].append(left)
+            results["x"].append(left + width / 2)
+            results["y"].append(top + height / 2)
+            results["width"].append(width)
+            results["height"].append(height)
+            results["colors"].append(col)
+            results["level"].append(level)
             # polygon coordinates
             poly = [
                 [left, top],
@@ -287,7 +278,7 @@ def quadtree(img, std_thr=40, heightmap=None, max_level=6):
                 [left + width, top + height],
                 [left, top + height],
             ]
-            results["polys"] += [np.asarray(poly)]
+            results["polys"].append(np.asarray(poly))
 
             return
         
@@ -539,11 +530,11 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
             tile = Image.fromarray(clipped_img, "RGBA")
 
             for k, v in temp_results.items():
-                results[k] += temp_results[k]
-            results["images"] += [tile]
-            results["colors"] += [col]
-            results["level"] += [level]
-            results["polys"] += [np.array([point for point in clip.exterior.coords])]
+                results[k].append(temp_results[k])
+            results["images"].append(tile)
+            results["colors"].append(col)
+            results["level"].append(level)
+            results["polys"].append(np.array([point for point in clip.exterior.coords]))
 
             return
         
@@ -558,19 +549,7 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
             )
         
 
-    results = {
-        "top": [],
-        "left": [],
-        "x": [],
-        "y": [],
-        "width": [],
-        "height": [],
-        "colors": [],
-        "polys": [],
-        "shifted_polys": [],
-        "images": [],
-        "level": [],
-    }
+    results = defaultdict(list)
 
     width, height = img.size
     
@@ -677,15 +656,9 @@ def throw_polys(img, n_points=100, n_corners=3, distance=10, heightmap=None):
         img, heightmap=heightmap, distance=distance, n_points=n_points
     )
 
-    results = {
-        "x": list(xs),
-        "y": list(ys),
-        "colors": [],
-        "polys": [],
-        "shifted_polys": [],
-        "images": [],
-        "level": [],
-    }
+    results = defaultdict(list)
+    results["x"] = list(xs)
+    results["y"] = list(ys)
 
     for x, y, d in zip(xs, ys, distances):
 
