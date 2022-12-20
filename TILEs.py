@@ -666,3 +666,84 @@ def throw_polys(img, n_points=100, n_corners=3, distance=10, heightmap=None):
         results["polys"].append(poly)
         results["colors"].append(color)
     return results
+
+def recursive_slice(img, heightmap=None, std_thr=40, max_level=2):
+    
+    img, heightmap = check_img_hmap(img)
+    arr = np.array(img)
+    results = defaultdict(list)
+    
+    def reslice(img, heightmap, results, std_thr=std_thr, level=0, max_level=max_level, coords=(0, 0, 1, 1), direction=0):
+
+        left, top, right, bottom = coords
+        
+        int_left = int(np.floor(left))
+        int_top = int(np.floor(top))
+        int_right = int(np.ceil(right))
+        int_bottom = int(np.ceil(bottom))
+        
+        
+        try:
+            std, col, hmap_weight = RGB_std(arr[int_top: int_bottom, int_left:int_right], 
+                                        heightmap[int_top: int_bottom, int_left:int_right])
+        except:
+            print(coords)
+            return
+        
+        
+        if (std < std_thr) | (level >= max_level) | (hmap_weight - (level * 0.01) < 0.1):
+
+            poly = [
+                [left, top],
+                [right, top],
+                [right, bottom],
+                [left, bottom],
+            ]
+            results['polys'].append(np.asarray(poly))
+            results['colors'].append(col)
+            results['level'].append(level)
+            
+            return
+            
+        else:
+            
+            x = np.random.uniform(left, right)
+            y = np.random.uniform(top, bottom)
+            
+            # equivalent to quadtree
+            # x = left + ((right - left) / 2)
+            # y = top + ((bottom - top) / 2)
+            
+            direction = np.abs(direction - 1)
+            
+            if direction == 0:
+                
+                left1, top1 = left, top
+                right1, bottom1 = right, y
+                
+                left2, top2 = left, y
+                right2, bottom2 = right, bottom
+                
+            if direction ==1:
+                
+                left1, top1 = left, top
+                right1, bottom1 = x, bottom
+                
+                left2, top2 = x, top
+                right2, bottom2 = right, bottom
+        
+        
+            reslice(arr, heightmap, results, level=level+1, max_level=max_level, coords=(left1, top1, right1, bottom1), direction=direction)
+            reslice(arr, heightmap, results, level=level+1, max_level=max_level, coords=(left2, top2, right2, bottom2), direction=direction)
+    
+    
+    
+    width, height = img.size
+    left, top = 0, 0
+    right, bottom = width, height
+    
+    arr = np.array(img)
+    
+    reslice(arr, heightmap, results, level=0, max_level=max_level, coords=(left, top, right, bottom))
+    
+    return results
