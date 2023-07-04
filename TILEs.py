@@ -328,7 +328,7 @@ def quadtree(img, std_thr=40, heightmap=None, max_level=6):
 
 
 #%% Voronoitrees
-def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
+def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None, first_poly=None):
     '''
     Function to filter the image with recursive voronoi areas, depending on the 
     local standard deviation or according to a heightmap.
@@ -554,9 +554,8 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None):
     width, height = img.size
     
     # the really first polygon is the image itself
-    first_poly = np.asarray(
-        [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]]
-    )
+    if first_poly is None:
+        first_poly = np.asarray([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]])
 
     voronoi(
         img,
