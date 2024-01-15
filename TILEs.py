@@ -556,6 +556,7 @@ def voronoitree(img, npoints=10, max_level=6, std_thr=40, heightmap=None, first_
     # the really first polygon is the image itself
     if first_poly is None:
         first_poly = np.asarray([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]])
+    
 
     voronoi(
         img,
@@ -666,7 +667,7 @@ def throw_polys(img, n_points=100, n_corners=3, distance=10, heightmap=None):
         results["colors"].append(color)
     return results
 
-def recursive_slice(img, heightmap=None, std_thr=40, max_level=2):
+def recursive_slice(img, heightmap=None, std_thr=40, max_level=7):
     
     img, heightmap = check_img_hmap(img)
     arr = np.array(img)
@@ -690,7 +691,7 @@ def recursive_slice(img, heightmap=None, std_thr=40, max_level=2):
             return
         
         
-        if (std < std_thr) | (level >= max_level) | (hmap_weight - (level * 0.01) < 0.1):
+        if (std < std_thr) | (level >= max_level) | (hmap_weight - (level * 0.01) < 0.2):
 
             poly = [
                 [left, top],
